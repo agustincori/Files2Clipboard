@@ -4,12 +4,15 @@ import pyperclip
 def Files2Clipboard(path, file_extension=".*", subdirectories=False, technology_filter=None):
     """
     Copies the contents of text files within a specified directory (and optionally its subdirectories) to the clipboard.
-    
+
+    Version:
+        1.0.1
+
     Parameters:
-    - path (str): The path to the directory containing the files.
-    - file_extension (str): The file extension to filter files by (e.g., '.txt'). Use '.*' to include all files.
-    - subdirectories (bool, optional): Whether to include subdirectories in the search. Defaults to False.
-    - technology_filter (dict, optional): A dictionary that filters files based on technology categories. Defaults to None.
+        - path (str): The path to the directory containing the files.
+        - file_extension (str): The file extension to filter files by (e.g., '.txt'). Use '.*' to include all files.
+        - subdirectories (bool, optional): Whether to include subdirectories in the search. Defaults to False.
+        - technology_filter (dict, optional): A dictionary that filters files based on technology categories. Defaults to None.
     """
     content_to_copy = ""
 
@@ -24,10 +27,11 @@ def Files2Clipboard(path, file_extension=".*", subdirectories=False, technology_
                 try:
                     with open(file_path, "r", encoding="utf-8") as f:
                         file_content = f.read()
+                        line_count = file_content.count('\n') + 1 if file_content else 0
                         content_to_copy += (
                             f"This is {root_label}{file}:\n{file_content}\n\n"
                         )
-                        print(f"Reading file: {file_path}")
+                        print(f"Reading file: {file_path} [{line_count} lines]")
                 except Exception as e:
                     print(f"Could not read {file_path} as text: {e}")
 
@@ -100,8 +104,8 @@ if __name__ == "__main__":
     # Example dictionary for technology filter
     technology_filter = {
         'web': True,
-        'react': True,
-        'python': False,
+        'react': False,
+        'python': True,
         'java': False,
         'rust': False,
         'cpp': False  # C++ filtering enabled
