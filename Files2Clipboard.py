@@ -6,7 +6,7 @@ def Files2Clipboard(path, file_extension=".*", subdirectories=False, technology_
     Copies the contents of text files within a specified directory (and optionally its subdirectories) to the clipboard.
 
     Version:
-        1.0.2
+        1.0.3
     Parameters:
         - path (str): The path to the directory containing the files.
         - file_extension (str): The file extension to filter files by (e.g., '.txt'). Use '.*' to include all files.
@@ -16,8 +16,9 @@ def Files2Clipboard(path, file_extension=".*", subdirectories=False, technology_
     content_to_copy = ""
     script_name = os.path.basename(__file__)  # name of this script file
 
-    # Get filtered extensions based on the technology filter
+    # Get filtered extensions and directories based on the technology filter
     file_extension = filter_by_technology(file_extension, technology_filter)
+    directory_excludes = filter_directories(technology_filter)
 
     def read_files_in_directory(directory_path, root_label):
         nonlocal content_to_copy
@@ -51,8 +52,11 @@ def Files2Clipboard(path, file_extension=".*", subdirectories=False, technology_
 
         # Walk through the directory and its subdirectories
         for root, dirs, files in os.walk(path):
-            # Filter out __pycache__ and .git directories
-            dirs[:] = [d for d in dirs if d not in ('__pycache__', '.git')]
+            # Filter out unwanted directories
+            dirs[:] = [
+                d for d in dirs
+                if d not in ('__pycache__', '.git') + tuple(directory_excludes)
+            ]
             root_label = f"./{os.path.relpath(root, path)}/" if root != path else "./"
             read_files_in_directory(root, root_label)
     else:
@@ -84,13 +88,12 @@ def filter_by_technology(file_extension, technology_filter):
         'csharp': ['.cs'],
         'ruby': ['.rb'],
         'go': ['.go'],
-        'cpp': ['.cpp', '.hpp', '.h'],  # C++ files included
+        'cpp': ['.cpp', '.hpp', '.h'],
         'bash': ['.sh'],
         'typescript': ['.ts', '.tsx'],
-        'rust': ['.rs', '.toml', '.rlib', '.lock', '.cargo']
+        'rust': ['.rs', '.toml', '.rlib','.cargo']
     }
 
-    # If a technology filter is provided, adjust the file extension based on it
     if technology_filter:
         selected_extensions = []
         for tech, enabled in technology_filter.items():
@@ -98,7 +101,28 @@ def filter_by_technology(file_extension, technology_filter):
                 selected_extensions.extend(technology_extensions[tech])
         if selected_extensions:
             return selected_extensions
+
     return [file_extension] if file_extension != ".*" else ".*"
+
+def filter_directories(technology_filter):
+    """
+    Returns a list of directory names to exclude based on the technology filter.
+    E.g., Rust projects often have a 'target' directory that clutters output.
+    """
+    tech_directories = {
+        'rust': ['target'],
+        # you can add other tech-specific directories here, e.g.:
+        # 'node': ['node_modules'],
+    }
+
+    if technology_filter:
+        excluded = []
+        for tech, enabled in technology_filter.items():
+            if enabled and tech in tech_directories:
+                excluded.extend(tech_directories[tech])
+        return excluded
+
+    return []
 
 if __name__ == "__main__":
     path = os.path.dirname(os.path.abspath(__file__))  # Get the directory of the current file
@@ -111,8 +135,8 @@ if __name__ == "__main__":
         'react': False,
         'python': True,
         'java': False,
-        'rust': False,
-        'cpp': False  # C++ filtering disabled
+        'rust': True,
+        'cpp': False
     }
 
     Files2Clipboard(path, file_extension, subdirectories, technology_filter)
