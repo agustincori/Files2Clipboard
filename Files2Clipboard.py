@@ -6,7 +6,7 @@ def Files2Clipboard(path, file_extension=".*", subdirectories=False, technology_
     Copies the contents of text files within a specified directory (and optionally its subdirectories) to the clipboard.
 
     Version:
-        1.0.3
+        1.1.1
     Parameters:
         - path (str): The path to the directory containing the files.
         - file_extension (str): The file extension to filter files by (e.g., '.txt'). Use '.*' to include all files.
@@ -42,11 +42,10 @@ def Files2Clipboard(path, file_extension=".*", subdirectories=False, technology_
                     print(f"Could not read {file_path} as text: {e}")
 
     if subdirectories:
-        # Run the tree command to get the directory structure
-        tree_command = f'tree "{path}" /F'
+        # Generate a filtered, cross-platform directory tree
         try:
-            tree_output = os.popen(tree_command).read()
-            content_to_copy += f"Directory tree of {path}:\n{tree_output}\n\n"
+            tree_output = generate_filtered_tree(path, directory_excludes)
+            content_to_copy += f"Directory tree of {path} (filtered):\n{tree_output}\n\n"
         except Exception as e:
             print(f"Could not generate directory tree: {e}")
 
@@ -91,7 +90,7 @@ def filter_by_technology(file_extension, technology_filter):
         'cpp': ['.cpp', '.hpp', '.h'],
         'bash': ['.sh'],
         'typescript': ['.ts', '.tsx'],
-        'rust': ['.rs', '.toml', '.rlib','.cargo']
+        'rust': ['.rs', '.toml', '.rlib', '.cargo']
     }
 
     if technology_filter:
@@ -110,7 +109,7 @@ def filter_directories(technology_filter):
     E.g., Rust projects often have a 'target' directory that clutters output.
     """
     tech_directories = {
-        'rust': ['target'],
+        'rust': ['target','.git'],
         # you can add other tech-specific directories here, e.g.:
         # 'node': ['node_modules'],
     }
@@ -123,6 +122,32 @@ def filter_directories(technology_filter):
         return excluded
 
     return []
+
+def generate_filtered_tree(root_path, excludes):
+    """
+    Walks the directory tree from root_path and returns a string representation,
+    excluding any directories listed in 'excludes'.
+    """
+    lines = []
+    for current_root, dirs, files in os.walk(root_path):
+        # Exclude unwanted dirs in-place
+        dirs[:] = [d for d in dirs if d not in excludes]
+
+        # Calculate depth for indentation
+        rel = os.path.relpath(current_root, root_path)
+        depth = 0 if rel == "." else rel.count(os.sep) + 1
+        indent = "│   " * (depth - 1) + ("├── " if depth > 0 else "")
+
+        # Directory line
+        basename = os.path.basename(current_root) or current_root
+        lines.append(f"{indent}{basename}/")
+
+        # File lines
+        for i, fname in enumerate(files):
+            connector = "└── " if i == len(files) - 1 else "├── "
+            lines.append(f"{indent}{connector}{fname}")
+
+    return "\n".join(lines)
 
 if __name__ == "__main__":
     path = os.path.dirname(os.path.abspath(__file__))  # Get the directory of the current file
