@@ -6,8 +6,7 @@ def Files2Clipboard(path, file_extension=".*", subdirectories=False, technology_
     Copies the contents of text files within a specified directory (and optionally its subdirectories) to the clipboard.
 
     Version:
-        1.0.1
-
+        1.0.2
     Parameters:
         - path (str): The path to the directory containing the files.
         - file_extension (str): The file extension to filter files by (e.g., '.txt'). Use '.*' to include all files.
@@ -15,6 +14,7 @@ def Files2Clipboard(path, file_extension=".*", subdirectories=False, technology_
         - technology_filter (dict, optional): A dictionary that filters files based on technology categories. Defaults to None.
     """
     content_to_copy = ""
+    script_name = os.path.basename(__file__)  # name of this script file
 
     # Get filtered extensions based on the technology filter
     file_extension = filter_by_technology(file_extension, technology_filter)
@@ -22,6 +22,10 @@ def Files2Clipboard(path, file_extension=".*", subdirectories=False, technology_
     def read_files_in_directory(directory_path, root_label):
         nonlocal content_to_copy
         for file in os.listdir(directory_path):
+            # Skip the script itself
+            if file == script_name:
+                continue
+
             if file_extension == ".*" or any(file.endswith(ext) for ext in file_extension):
                 file_path = os.path.join(directory_path, file)
                 try:
@@ -29,7 +33,8 @@ def Files2Clipboard(path, file_extension=".*", subdirectories=False, technology_
                         file_content = f.read()
                         line_count = file_content.count('\n') + 1 if file_content else 0
                         content_to_copy += (
-                            f"This is {root_label}{file}:\n{file_content}\n\n"
+                            f"{root_label}{file} ({line_count} lines)\n"
+                            f"{file_content}\n\n"
                         )
                         print(f"Reading file: {file_path} [{line_count} lines]")
                 except Exception as e:
@@ -55,15 +60,14 @@ def Files2Clipboard(path, file_extension=".*", subdirectories=False, technology_
 
     if content_to_copy:
         pyperclip.copy(content_to_copy)
-        line_count = content_to_copy.count('\n')
-        print(f"All contents copied to clipboard [{line_count} lines].")
+        total_lines = content_to_copy.count('\n')
+        print(f"All contents copied to clipboard [{total_lines} lines].")
     else:
         print("No text files found to copy to clipboard.")
 
 def filter_by_technology(file_extension, technology_filter):
     """
     Adjusts the file extension based on the technology filter.
-    
     Parameters:
     - file_extension (str): The default file extension.
     - technology_filter (dict, optional): A dictionary that filters files based on technologies. Defaults to None.
@@ -108,7 +112,7 @@ if __name__ == "__main__":
         'python': True,
         'java': False,
         'rust': False,
-        'cpp': False  # C++ filtering enabled
+        'cpp': False  # C++ filtering disabled
     }
 
     Files2Clipboard(path, file_extension, subdirectories, technology_filter)
