@@ -46,21 +46,30 @@ def Files2Clipboard(path,
     def read_files_in_directory(directory_path, root_label):
         nonlocal content_to_copy
         for fname in os.listdir(directory_path):
+            # 1) Never touch the script itself
             if fname == script_name:
                 continue
-            if file_extension == ".*" or any(fname.endswith(ext) for ext in exts):
-                full_path = os.path.join(directory_path, fname)
-                try:
-                    with open(full_path, "r", encoding="utf-8") as f:
-                        data = f.read()
-                    line_count = data.count("\n") + 1 if data else 0
-                    content_to_copy += (
-                        f"{root_label}{fname} ({line_count} lines)\n"
-                        f"{data}\n\n"
-                    )
-                    print(f"Reading file: {full_path} [{line_count} lines]")
-                except Exception as e:
-                    print(f"Could not read {full_path} as text: {e}")
+
+            # 2) Only include files whose extensions made it through the tech filter
+            #    (exts is either ".*" or a list of allowed extensions)
+            if exts != ".*" and not any(fname.endswith(ext) for ext in exts):
+                # fname’s extension isn’t in your filtered list → skip it
+                continue
+
+            full_path = os.path.join(directory_path, fname)
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    data = f.read()
+            except Exception as e:
+                print(f"Could not read {full_path} as text: {e}")
+                continue
+
+            line_count = data.count("\n") + 1 if data else 0
+            content_to_copy += (
+                f"{root_label}{fname} ({line_count} lines)\n"
+                f"{data}\n\n"
+            )
+            print(f"Reading file: {full_path} [{line_count} lines]")
 
     if subdirectories:
         # Prepend the filtered directory tree
@@ -167,9 +176,9 @@ if __name__ == "__main__":
     file_extension = ".*"
     subdirectories = True
     technology_filter = {
-        'web':    True,
+        'web':    False,
         'react':  False,
-        'python': True,
+        'python': False,
         'java':   False,
         'rust':   True,
         'cpp':    False
@@ -180,7 +189,7 @@ if __name__ == "__main__":
                     file_extension=file_extension,
                     subdirectories=subdirectories,
                     technology_filter=technology_filter,
-                    copy_content=False)
+                    copy_content=True)
 
     # To include file contents as well, set copy_content=True:
     # Files2Clipboard(path, subdirectories=True, technology_filter=technology_filter, copy_content=True)
