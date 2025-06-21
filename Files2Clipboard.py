@@ -11,7 +11,7 @@ def Files2Clipboard(path,
     to the clipboard.
 
     Version:
-        1.2.1
+        1.2.2
     Parameters:
         - path (str): The path to the directory containing the files.
         - file_extension (str): The file extension to filter files by (e.g., '.txt').
@@ -138,21 +138,53 @@ def filter_by_technology(file_extension, technology_filter):
 
 def filter_directories(technology_filter):
     """
-    Returns a list of directory names to exclude based on the technology filter.
+    Returns a list of directory names to exclude from both the tree
+    and the content walk.
+
+    Always skips global noise: VCS dirs, IDE settings, caches, build outputs, etc.
+    Then adds any tech-specific folders for the enabled flags in technology_filter.
     """
-    tech_dirs = {
-        'rust': ['target', '.git'],
-        # Add other tech-specific directories here as needed.
+    # 1) global dirs we never want
+    global_ignores = {
+        # version control
+        '.git', '.svn', '.hg', '.bzr',
+        # python
+        '__pycache__', 'venv', '.venv', 'env', '.egg-info',
+        # node / web
+        'node_modules', 'bower_components', 'dist', 'build', '.cache',
+        # other common outputs
+        'target', 'bin', 'obj', 'pkg',
+        # logs, tmp, coverage
+        'log', 'logs', 'tmp', 'coverage', '.nyc_output',
+        # IDE / editor
+        '.idea', '.vscode', '.DS_Store',
+        # vendor
+        'vendor', '.bundle',
     }
 
-    if technology_filter:
-        excluded = []
-        for tech, enabled in technology_filter.items():
-            if enabled and tech in tech_dirs:
-                excluded.extend(tech_dirs[tech])
-        return excluded
+    # 2) anything extra per-technology
+    tech_specific = {
+        'web':        {'public', 'static'},
+        'react':      {'public', 'build'},
+        'python':     {'dist'},
+        'java':       {'build', '.gradle'},
+        'csharp':     {'.vs'},
+        'ruby':       {'tmp'},
+        'go':         {'vendor'},
+        'cpp':        set(),
+        'bash':       set(),
+        'typescript': set(),
+        'rust':       {'target'},
+    }
 
-    return []
+    excludes = set(global_ignores)
+    if technology_filter:
+        for tech, enabled in technology_filter.items():
+            if enabled:
+                excludes.update(tech_specific.get(tech, set()))
+
+    # Return as a list so callers can do: dirs[:] = [d for d in dirs if d not in excludes]
+    return list(excludes)
 
 
 def generate_filtered_tree(root_path, excludes):
@@ -192,7 +224,7 @@ if __name__ == "__main__":
                     file_extension=file_extension,
                     subdirectories=subdirectories,
                     technology_filter=technology_filter,
-                    copy_content=True)
+                    copy_content=False)
 
     # To include file contents as well, set copy_content=True:
     # Files2Clipboard(path, subdirectories=True, technology_filter=technology_filter, copy_content=True)
