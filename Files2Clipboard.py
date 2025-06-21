@@ -11,7 +11,7 @@ def Files2Clipboard(path,
     to the clipboard.
 
     Version:
-        1.2.0
+        1.2.1
     Parameters:
         - path (str): The path to the directory containing the files.
         - file_extension (str): The file extension to filter files by (e.g., '.txt').
@@ -37,7 +37,10 @@ def Files2Clipboard(path,
             tree_output = generate_filtered_tree(path, dir_excludes)
             result = f"Directory tree of {path} (filtered):\n{tree_output}"
             pyperclip.copy(result)
-            print(f"Directory tree of {path} (filtered) copied to clipboard.")
+
+            # count the total lines in the result
+            total_lines = result.count("\n")
+            print(f"Directory tree of {path} (filtered) copied to clipboard [{total_lines} lines].")
         except Exception as e:
             print(f"Could not generate directory tree: {e}")
         return
