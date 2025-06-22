@@ -11,7 +11,7 @@ def Files2Clipboard(path,
     to the clipboard.
 
     Version:
-        1.2.2
+        1.3.0
     Parameters:
         - path (str): The path to the directory containing the files.
         - file_extension (str): The file extension to filter files by (e.g., '.txt').
@@ -111,18 +111,19 @@ def filter_by_technology(file_extension, technology_filter):
     Returns a list of file extensions to include, or ".*" for all files.
     """
     technology_extensions = {
-        'web':       ['.html', '.php', '.js', '.jsx', '.css', '.scss', '.sass'],
-        'react':     ['.js', '.jsx', '.ts', '.tsx', '.css', '.scss',
-                      '.env', 'package.json', '.babelrc', '.prettierrc'],
-        'python':    ['.py'],
-        'java':      ['.java'],
-        'csharp':    ['.cs'],
-        'ruby':      ['.rb'],
-        'go':        ['.go'],
-        'cpp':       ['.cpp', '.hpp', '.h'],
-        'bash':      ['.sh'],
-        'typescript':['.ts', '.tsx'],
-        'rust':      ['.rs', '.toml', '.rlib', '.cargo']
+        'web':             ['.html', '.php', '.js', '.jsx', '.css', '.scss', '.sass'],
+        'react':           ['.js', '.jsx', '.ts', '.tsx', '.css', '.scss',
+                             '.env', 'package.json', '.babelrc', '.prettierrc'],
+        'python':          ['.py'],
+        'java':            ['.java'],
+        'csharp':          ['.cs'],
+        'ruby':            ['.rb'],
+        'go':              ['.go'],
+        'cpp':             ['.cpp', '.hpp', '.h'],
+        'bash':            ['.sh'],
+        'typescript':      ['.ts', '.tsx'],
+        'rust':            ['.rs', '.toml', '.rlib', '.cargo'],
+        'structured-data': ['.yml', '.yaml', '.json'],  # ← newly added
     }
 
     if technology_filter:
@@ -164,17 +165,18 @@ def filter_directories(technology_filter):
 
     # 2) anything extra per-technology
     tech_specific = {
-        'web':        {'public', 'static'},
-        'react':      {'public', 'build'},
-        'python':     {'dist'},
-        'java':       {'build', '.gradle'},
-        'csharp':     {'.vs'},
-        'ruby':       {'tmp'},
-        'go':         {'vendor'},
-        'cpp':        set(),
-        'bash':       set(),
-        'typescript': set(),
-        'rust':       {'target'},
+        'web':             {'public', 'static'},
+        'react':           {'public', 'build'},
+        'python':          {'dist'},
+        'java':            {'build', '.gradle'},
+        'csharp':          {'.vs'},
+        'ruby':            {'tmp'},
+        'go':               {'vendor'},
+        'cpp':              set(),
+        'bash':             set(),
+        'typescript':       set(),
+        'rust':             {'target'},
+        'structured-data':  set(),  # ← newly added
     }
 
     excludes = set(global_ignores)
@@ -211,12 +213,13 @@ if __name__ == "__main__":
     file_extension = ".*"
     subdirectories = True
     technology_filter = {
-        'web':    False,
-        'react':  False,
-        'python': False,
-        'java':   False,
-        'rust':   True,
-        'cpp':    False
+        'web':             False,
+        'react':           False,
+        'python':          False,
+        'java':            False,
+        'rust':            False,
+        'cpp':             False,
+        'structured-data': True
     }
 
     # By default, only the directory tree is copied (no file contents).
@@ -224,7 +227,7 @@ if __name__ == "__main__":
                     file_extension=file_extension,
                     subdirectories=subdirectories,
                     technology_filter=technology_filter,
-                    copy_content=False)
+                    copy_content=True)
 
     # To include file contents as well, set copy_content=True:
     # Files2Clipboard(path, subdirectories=True, technology_filter=technology_filter, copy_content=True)
