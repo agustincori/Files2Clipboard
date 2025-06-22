@@ -123,7 +123,7 @@ def filter_by_technology(file_extension, technology_filter):
         'bash':            ['.sh'],
         'typescript':      ['.ts', '.tsx'],
         'rust':            ['.rs', '.toml', '.rlib', '.cargo'],
-        'structured-data': ['.yml', '.yaml', '.json'],  # ← newly added
+        'structured-data': ['.yml', '.yaml', '.json'],
     }
 
     if technology_filter:
