@@ -11,7 +11,7 @@ def Files2Clipboard(path,
     to the clipboard.
 
     Version:
-        1.3.0
+        1.4.0
     Parameters:
         - path (str): The path to the directory containing the files.
         - file_extension (str): The file extension to filter files by (e.g., '.txt').
@@ -123,6 +123,7 @@ def filter_by_technology(file_extension, technology_filter):
         'bash':            ['.sh'],
         'typescript':      ['.ts', '.tsx'],
         'rust':            ['.rs', '.toml', '.rlib', '.cargo'],
+        'vb':              ['.vb'],
         'structured-data': ['.yml', '.yaml', '.json'],
     }
 
@@ -165,18 +166,19 @@ def filter_directories(technology_filter):
 
     # 2) anything extra per-technology
     tech_specific = {
-        'web':             {'public', 'static'},
-        'react':           {'public', 'build'},
-        'python':          {'dist'},
-        'java':            {'build', '.gradle'},
-        'csharp':          {'.vs'},
-        'ruby':            {'tmp'},
+        'web':              {'public', 'static'},
+        'react':            {'public', 'build'},
+        'python':           {'dist'},
+        'java':             {'build', '.gradle'},
+        'csharp':           {'.vs'},
+        'ruby':             {'tmp'},
         'go':               {'vendor'},
         'cpp':              set(),
         'bash':             set(),
         'typescript':       set(),
         'rust':             {'target'},
-        'structured-data':  set(),  # ← newly added
+        'vb':               set(),
+        'structured-data':  set(),
     }
 
     excludes = set(global_ignores)
@@ -219,6 +221,7 @@ if __name__ == "__main__":
         'java':            False,
         'rust':            False,
         'cpp':             False,
+        'vb':              True,
         'structured-data': True
     }
 
