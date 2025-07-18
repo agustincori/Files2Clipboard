@@ -11,7 +11,7 @@ def Files2Clipboard(path,
     to the clipboard.
 
     Version:
-        1.4.0
+        1.4.1
     Parameters:
         - path (str): The path to the directory containing the files.
         - file_extension (str): The file extension to filter files by (e.g., '.txt').
@@ -125,6 +125,7 @@ def filter_by_technology(file_extension, technology_filter):
         'rust':            ['.rs', '.toml', '.rlib', '.cargo'],
         'vb':              ['.vb'],
         'structured-data': ['.yml', '.yaml', '.json'],
+        'sql':             ['.sql', '.psql', '.pgsql', '.ddl', '.dml'],
     }
 
     if technology_filter:
@@ -179,6 +180,9 @@ def filter_directories(technology_filter):
         'rust':             {'target'},
         'vb':               set(),
         'structured-data':  set(),
+        'sql':              {'migrations', 'migration', 'seeds', 'seed',
+                             'database', 'db', 'sql', 'ddl', 'dml'},
+        # -------------------------------------------------------------------
     }
 
     excludes = set(global_ignores)
@@ -221,8 +225,9 @@ if __name__ == "__main__":
         'java':            False,
         'rust':            False,
         'cpp':             False,
-        'vb':              True,
-        'structured-data': True
+        'vb':              False,
+        'structured-data': True,
+        'sql':             True, 
     }
 
     # By default, only the directory tree is copied (no file contents).
