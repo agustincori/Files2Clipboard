@@ -1,241 +1,348 @@
+"""
+files2clipboard.py
+──────────────────
+Version:
+    2.0.0
+──────────────────   
+Copy a directory tree – and optionally file contents – to the clipboard.
+Can interactively split very large payloads into ChatGPT‑friendly chunks.
+
+Usage example
+-------------
+from files2clipboard import files_to_clipboard
+
+files_to_clipboard(
+    path=".",
+    subdirectories=True,
+    technology_filter={
+        "structured-data": True,
+        "sql": True,
+    },
+    copy_content=True,       # include file contents
+    chatgpt_split=True       # split into ≤7 000‑token chunks
+)
+"""
+
+from __future__ import annotations
+
 import os
+import sys
+from pathlib import Path
+from typing import Iterable, List, Set
+
 import pyperclip
 
-def Files2Clipboard(path,
-                   file_extension=".*",
-                   subdirectories=False,
-                   technology_filter=None,
-                   copy_content=True):
+# ──────────────────────────────────────────────────────────────────────────────
+# Configuration constants
+# ──────────────────────────────────────────────────────────────────────────────
+MAX_TOKENS_PER_CHUNK = 50_000          # leave head‑room below GPT‑4‑o 8 192 limit
+TOKENS_PER_CHAR_EST  = 0.25           # back‑up estimate if tiktoken missing
+CHATGPT_SPLIT_GLOBAL = False          # flip once, enable everywhere
+
+try:
+    import tiktoken
+
+    _ENCODER = tiktoken.encoding_for_model("gpt-4o-mini")
+
+    def _count_tokens(text: str) -> int:
+        """Token count via *tiktoken*."""
+        return len(_ENCODER.encode(text))
+
+except Exception:  # pragma: no cover – optional dependency
+    _ENCODER = None
+
+    def _count_tokens(text: str) -> int:     # type: ignore[override]
+        """Roughly estimate tokens if *tiktoken* is unavailable."""
+        return int(len(text) * TOKENS_PER_CHAR_EST)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Public API
+# ──────────────────────────────────────────────────────────────────────────────
+def files_to_clipboard(                   # pylint: disable=too-many-arguments
+    path: str | os.PathLike[str],
+    *,
+    file_extension: str = ".*",
+    subdirectories: bool = False,
+    technology_filter: dict[str, bool] | None = None,
+    copy_content: bool = True,
+    chatgpt_split: bool = False,
+    max_tokens: int = MAX_TOKENS_PER_CHUNK,
+) -> None:
     """
-    Copies the directory tree and/or contents of text files within a specified directory
-    to the clipboard.
+    Copy directory tree – and optionally file contents – to the clipboard.
 
-    Version:
-        1.4.1
-    Parameters:
-        - path (str): The path to the directory containing the files.
-        - file_extension (str): The file extension to filter files by (e.g., '.txt').
-                                Use '.*' to include all files.
-        - subdirectories (bool, optional): Whether to include subdirectories in the search.
-                                           Defaults to False.
-        - technology_filter (dict, optional): A dictionary that filters files based on
-                                              technology categories. Defaults to None.
-        - copy_content (bool, optional): If False, only the directory tree is copied
-                                          (no file contents). If True (default), file
-                                          contents are included as well.
+    Parameters
+    ----------
+    path : str | Path
+        Root directory.
+    file_extension : str, default ".*"
+        Filter by extension; ".*" means “all”.
+    subdirectories : bool, default False
+        If False, only scan *path* itself; if True, walk recursively.
+    technology_filter : dict[str, bool] | None
+        Enable per‑tech presets (e.g. {"python": True, "sql": True}).
+    copy_content : bool, default True
+        If False, only copy the tree (no file bodies).
+    chatgpt_split : bool, default False
+        When True (or when CHATGPT_SPLIT_GLOBAL is True) and the resulting
+        text exceeds *max_tokens*, split it into interactive chunks that you
+        can paste one‑by‑one into ChatGPT.
+    max_tokens : int, default 7 000
+        Hard ceiling for each chunk.
     """
-    script_name = os.path.basename(__file__)
-    content_to_copy = ""
+    root           = Path(path).resolve()
+    exts           = _filter_by_technology(file_extension, technology_filter)
+    excludes       = _filter_directories(technology_filter)
+    script_name    = Path(__file__).name
+    buffer         : list[str] = []
 
-    # Determine which file extensions to include and which directories to exclude
-    exts = filter_by_technology(file_extension, technology_filter)
-    dir_excludes = filter_directories(technology_filter)
+    # ------------------------------------------------------------------ tree
+    try:
+        tree = _generate_tree(root, excludes)
+    except Exception as exc:  # pragma: no cover
+        print(f"[error] Could not generate directory tree: {exc}", file=sys.stderr)
+        tree = ""
 
-    # If the user only wants the tree, generate and copy it, then exit
     if not copy_content:
-        try:
-            tree_output = generate_filtered_tree(path, dir_excludes)
-            result = f"Directory tree of {path} (filtered):\n{tree_output}"
-            pyperclip.copy(result)
+        payload = f"Directory tree of {root} (filtered):\n{tree}"
+        _commit_to_clipboard(payload)
 
-            # count the total lines in the result
-            total_lines = result.count("\n")
-            print(f"Directory tree of {path} (filtered) copied to clipboard [{total_lines} lines].")
-        except Exception as e:
-            print(f"Could not generate directory tree: {e}")
+        lines = payload.count("\n") + 1          # count \n plus the last line
+        print(f"✓ Directory tree copied ({lines:,} lines).")
         return
 
-    # Otherwise, copy_content == True: include tree (if requested) and file contents
-    def read_files_in_directory(directory_path, root_label):
-        nonlocal content_to_copy
-        for fname in os.listdir(directory_path):
-            # 1) Never touch the script itself
-            if fname == script_name:
-                continue
-
-            # 2) Only include files whose extensions made it through the tech filter
-            #    (exts is either ".*" or a list of allowed extensions)
-            if exts != ".*" and not any(fname.endswith(ext) for ext in exts):
-                # fname’s extension isn’t in your filtered list → skip it
-                continue
-
-            full_path = os.path.join(directory_path, fname)
-            try:
-                with open(full_path, "r", encoding="utf-8") as f:
-                    data = f.read()
-            except Exception as e:
-                print(f"Could not read {full_path} as text: {e}")
-                continue
-
-            line_count = data.count("\n") + 1 if data else 0
-            content_to_copy += (
-                f"{root_label}{fname} ({line_count} lines)\n"
-                f"{data}\n\n"
-            )
-            print(f"Reading file: {full_path} [{line_count} lines]")
-
+    # ------------------------------------------------------------ file bodies
     if subdirectories:
-        # Prepend the filtered directory tree
-        try:
-            tree = generate_filtered_tree(path, dir_excludes)
-            content_to_copy += f"Directory tree of {path} (filtered):\n{tree}\n\n"
-        except Exception as e:
-            print(f"Could not generate directory tree: {e}")
-
-        # Walk through subdirectories
-        for root, dirs, files in os.walk(path):
-            dirs[:] = [
-                d for d in dirs
-                if d not in ('__pycache__', '.git') + tuple(dir_excludes)
-            ]
-            label = (
-                f"./{os.path.relpath(root, path)}/"
-                if root != path else "./"
+        for dir_path in _walk_dirs(root, excludes):
+            _read_files_into_buffer(
+                dir_path,
+                buffer,
+                allowed_exts=exts,
+                root_label=_relative_label(dir_path, root),
+                script_name=script_name,
             )
-            read_files_in_directory(root, label)
     else:
-        # Only the root directory
-        read_files_in_directory(path, "./")
+        _read_files_into_buffer(
+            root,
+            buffer,
+            allowed_exts=exts,
+            root_label="./",
+            script_name=script_name,
+        )
 
-    if content_to_copy:
-        pyperclip.copy(content_to_copy)
-        total_lines = content_to_copy.count("\n")
-        print(f"All contents copied to clipboard [{total_lines} lines].")
-    else:
-        print("No text files found to copy to clipboard.")
+    if not buffer and not tree:
+        print("[info] Nothing to copy – no matching files found.")
+        return
 
+    content = (
+        f"Directory tree of {root} (filtered):\n{tree}\n\n" if subdirectories else ""
+    ) + "".join(buffer)
 
-def filter_by_technology(file_extension, technology_filter):
-    """
-    Adjusts the file extension filter based on the technology filter.
-    Returns a list of file extensions to include, or ".*" for all files.
-    """
-    technology_extensions = {
-        'web':             ['.html', '.php', '.js', '.jsx', '.css', '.scss', '.sass'],
-        'react':           ['.js', '.jsx', '.ts', '.tsx', '.css', '.scss',
-                             '.env', 'package.json', '.babelrc', '.prettierrc'],
-        'python':          ['.py'],
-        'java':            ['.java'],
-        'csharp':          ['.cs'],
-        'ruby':            ['.rb'],
-        'go':              ['.go'],
-        'cpp':             ['.cpp', '.hpp', '.h'],
-        'bash':            ['.sh'],
-        'typescript':      ['.ts', '.tsx'],
-        'rust':            ['.rs', '.toml', '.rlib', '.cargo'],
-        'vb':              ['.vb'],
-        'structured-data': ['.yml', '.yaml', '.json'],
-        'sql':             ['.sql', '.psql', '.pgsql', '.ddl', '.dml'],
-    }
-
-    if technology_filter:
-        selected = []
-        for tech, enabled in technology_filter.items():
-            if enabled and tech in technology_extensions:
-                selected.extend(technology_extensions[tech])
-        if selected:
-            return selected
-
-    return [file_extension] if file_extension != ".*" else ".*"
+    _split_or_copy(content, chatgpt_split or CHATGPT_SPLIT_GLOBAL, max_tokens)
 
 
-def filter_directories(technology_filter):
-    """
-    Returns a list of directory names to exclude from both the tree
-    and the content walk.
-
-    Always skips global noise: VCS dirs, IDE settings, caches, build outputs, etc.
-    Then adds any tech-specific folders for the enabled flags in technology_filter.
-    """
-    # 1) global dirs we never want
-    global_ignores = {
-        # version control
-        '.git', '.svn', '.hg', '.bzr',
-        # python
-        '__pycache__', 'venv', '.venv', 'env', '.egg-info',
-        # node / web
-        'node_modules', 'bower_components', 'dist', 'build', '.cache',
-        # other common outputs
-        'target', 'bin', 'obj', 'pkg',
-        # logs, tmp, coverage
-        'log', 'logs', 'tmp', 'coverage', '.nyc_output',
-        # IDE / editor
-        '.idea', '.vscode', '.DS_Store',
-        # vendor
-        'vendor', '.bundle',
-    }
-
-    # 2) anything extra per-technology
-    tech_specific = {
-        'web':              {'public', 'static'},
-        'react':            {'public', 'build'},
-        'python':           {'dist'},
-        'java':             {'build', '.gradle'},
-        'csharp':           {'.vs'},
-        'ruby':             {'tmp'},
-        'go':               {'vendor'},
-        'cpp':              set(),
-        'bash':             set(),
-        'typescript':       set(),
-        'rust':             {'target'},
-        'vb':               set(),
-        'structured-data':  set(),
-        'sql':              {'migrations', 'migration', 'seeds', 'seed',
-                             'database', 'db', 'sql', 'ddl', 'dml'},
-        # -------------------------------------------------------------------
-    }
-
-    excludes = set(global_ignores)
-    if technology_filter:
-        for tech, enabled in technology_filter.items():
-            if enabled:
-                excludes.update(tech_specific.get(tech, set()))
-
-    # Return as a list so callers can do: dirs[:] = [d for d in dirs if d not in excludes]
-    return list(excludes)
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers – tree generation & walking
+# ──────────────────────────────────────────────────────────────────────────────
+def _walk_dirs(root: Path, excludes: Set[str]) -> Iterable[Path]:
+    """Yield *root* and every sub‑directory not in *excludes*."""
+    for dir_path, dir_names, _ in os.walk(root):
+        # prune in‑place to avoid descending into excluded dirs
+        dir_names[:] = [d for d in dir_names if d not in excludes]
+        yield Path(dir_path)
 
 
-def generate_filtered_tree(root_path, excludes):
-    """
-    Walks the directory tree from root_path and returns a string representation,
-    excluding any directories listed in 'excludes'.
-    """
-    lines = []
-    for current_root, dirs, files in os.walk(root_path):
-        dirs[:] = [d for d in dirs if d not in excludes]
-        rel = os.path.relpath(current_root, root_path)
-        depth = 0 if rel == "." else rel.count(os.sep) + 1
-        indent = "│   " * (depth - 1) + ("├── " if depth > 0 else "")
-        basename = os.path.basename(current_root) or current_root
-        lines.append(f"{indent}{basename}/")
-        for i, fname in enumerate(files):
-            connector = "└── " if i == len(files) - 1 else "├── "
+def _generate_tree(root: Path, excludes: Set[str]) -> str:
+    """Return an ASCII tree of *root* excluding *excludes* directories."""
+    lines: list[str] = []
+    for current_root, dir_names, file_names in os.walk(root):
+        dir_names[:] = [d for d in dir_names if d not in excludes]
+        rel          = os.path.relpath(current_root, root)
+        depth        = 0 if rel == "." else rel.count(os.sep) + 1
+        indent       = "│   " * (depth - 1) + ("├── " if depth else "")
+        base         = os.path.basename(current_root) or current_root
+        lines.append(f"{indent}{base}/")
+        for idx, fname in enumerate(file_names):
+            connector = "└── " if idx == len(file_names) - 1 else "├── "
             lines.append(f"{indent}{connector}{fname}")
     return "\n".join(lines)
 
 
-if __name__ == "__main__":
-    path = os.path.dirname(os.path.abspath(__file__))
-    file_extension = ".*"
-    subdirectories = True
-    technology_filter = {
-        'web':             False,
-        'react':           False,
-        'python':          False,
-        'java':            False,
-        'rust':            False,
-        'cpp':             False,
-        'vb':              False,
-        'structured-data': True,
-        'sql':             True, 
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers – file selection & reading
+# ──────────────────────────────────────────────────────────────────────────────
+def _read_files_into_buffer(
+    directory: Path,
+    buffer: list[str],
+    *,
+    allowed_exts: List[str] | str,
+    root_label: str,
+    script_name: str,
+) -> None:
+    """Append every eligible file in *directory* to *buffer*."""
+    for fname in os.listdir(directory):
+        if fname == script_name:
+            continue                                    # 1) never copy myself
+        if allowed_exts != ".*" and not any(
+            fname.endswith(ext) for ext in allowed_exts
+        ):
+            continue                                    # 2) wrong extension
+        full_path = directory / fname
+        try:
+            data = full_path.read_text(encoding="utf-8")
+        except Exception as exc:  # pragma: no cover
+            print(f"[warn] Could not read {full_path}: {exc}", file=sys.stderr)
+            continue
+        lines = data.count("\n") + 1
+        buffer.append(f"{root_label}{fname} ({lines} lines)\n{data}\n\n")
+        print(f"[read] {full_path} ({lines} lines)")
+
+
+def _filter_by_technology(
+    file_extension: str, technology_filter: dict[str, bool] | None
+) -> List[str] | str:
+    """Return list of allowed extensions given *technology_filter*."""
+    tech_exts: dict[str, List[str]] = {
+        "web":             [".html", ".php", ".js", ".jsx", ".css", ".scss", ".sass"],
+        "react":           [".js", ".jsx", ".ts", ".tsx", ".css", ".scss",
+                            ".env", "package.json", ".babelrc", ".prettierrc"],
+        "python":          [".py"],
+        "java":            [".java"],
+        "csharp":          [".cs"],
+        "ruby":            [".rb"],
+        "go":              [".go"],
+        "cpp":             [".cpp", ".hpp", ".h"],
+        "bash":            [".sh"],
+        "typescript":      [".ts", ".tsx"],
+        "rust":            [".rs", ".toml", ".rlib", ".cargo"],
+        "vb":              [".vb"],
+        "structured-data": [".yml", ".yaml", ".json"],
+        "sql":             [".sql", ".psql", ".pgsql", ".ddl", ".dml"],
     }
+    if technology_filter:
+        selected: list[str] = [
+            ext
+            for tech, enabled in technology_filter.items()
+            if enabled
+            for ext in tech_exts.get(tech, [])
+        ]
+        if selected:
+            return selected
+    return [file_extension] if file_extension != ".*" else ".*"
 
-    # By default, only the directory tree is copied (no file contents).
-    Files2Clipboard(path,
-                    file_extension=file_extension,
-                    subdirectories=subdirectories,
-                    technology_filter=technology_filter,
-                    copy_content=True)
 
-    # To include file contents as well, set copy_content=True:
-    # Files2Clipboard(path, subdirectories=True, technology_filter=technology_filter, copy_content=True)
+def _filter_directories(technology_filter: dict[str, bool] | None) -> Set[str]:
+    """Return a set of directory names to ignore."""
+    global_ignores: Set[str] = {
+        # VCS
+        ".git", ".svn", ".hg", ".bzr",
+        # Python
+        "__pycache__", "venv", ".venv", "env", ".egg-info",
+        # Node/web
+        "node_modules", "bower_components", "dist", "build", ".cache",
+        # Common outputs
+        "target", "bin", "obj", "pkg",
+        # Misc
+        "log", "logs", "tmp", "coverage", ".nyc_output",
+        ".idea", ".vscode", ".DS_Store", "vendor", ".bundle",
+    }
+    tech_specific: dict[str, Set[str]] = {
+        "web":              {"public", "static"},
+        "react":            {"public", "build"},
+        "python":           {"dist"},
+        "java":             {"build", ".gradle"},
+        "csharp":           {".vs"},
+        "ruby":             {"tmp"},
+        "go":               {"vendor"},
+        "rust":             {"target"},
+        "sql":              {"migrations", "migration", "seeds", "seed",
+                             "database", "db", "sql", "ddl", "dml"},
+    }
+    if technology_filter:
+        for tech, enabled in technology_filter.items():
+            if enabled:
+                global_ignores.update(tech_specific.get(tech, set()))
+    return global_ignores
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers – clipboard commit & chunking
+# ──────────────────────────────────────────────────────────────────────────────
+def _split_or_copy(text: str, do_split: bool, max_tokens: int) -> None:
+    """Either copy in one go or interactively split into ≤*max_tokens* chunks."""
+    total_tokens = _count_tokens(text)
+    total_lines  = text.count("\n") + 1
+
+    if do_split and total_tokens > max_tokens:
+        chunks = _split_text(text, max_tokens)
+        parts  = len(chunks)
+        print(
+            f"\n[ChatGPT] {total_lines:,} lines ≈ {total_tokens:,} tokens "
+            f"→ {parts} chunk(s) (≤ {max_tokens} tokens)."
+        )
+        for idx, chunk in enumerate(chunks, 1):
+            _commit_to_clipboard(chunk)
+            lines  = chunk.count("\n") + 1
+            tokens = _count_tokens(chunk)
+            end    = "" if idx == parts else " – press <Enter> for next (q to quit)"
+            if input(f"[{idx}/{parts}] Copied {lines:,} lines "
+                     f"(≈{tokens:,} tokens){end}: ").lower().startswith("q"):
+                break
+        else:
+            print("✓ All chunks copied.")
+    else:
+        _commit_to_clipboard(text)
+        print(f"✓ Copied {total_lines:,} lines (≈{total_tokens:,} tokens).")
+
+
+def _split_text(text: str, max_tokens: int) -> List[str]:
+    """Split *text* on line boundaries, keeping each part ≤ max_tokens."""
+    chunks, buf, buf_tok = [], [], 0
+    for line in text.splitlines(keepends=True):
+        tok = _count_tokens(line)
+        if buf and buf_tok + tok > max_tokens:
+            chunks.append("".join(buf))
+            buf, buf_tok = [], 0
+        buf.append(line)
+        buf_tok += tok
+    if buf:
+        chunks.append("".join(buf))
+    return chunks
+
+
+def _commit_to_clipboard(data: str) -> None:
+    """Copy *data* to clipboard, falling back gracefully."""
+    try:
+        pyperclip.copy(data)
+    except Exception as exc:  # pragma: no cover
+        print(f"[error] Clipboard failure: {exc}", file=sys.stderr)
+        raise
+
+
+def _relative_label(current: Path, root: Path) -> str:
+    """Return './' for root or './sub/dir/' for children."""
+    return "./" if current == root else f"./{current.relative_to(root)}/"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CLI entry‑point for quick testing
+# ──────────────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    files_to_clipboard(
+        path=Path(__file__).parent,
+        subdirectories=True,
+        technology_filter = {
+            'web':             False,
+            'react':           True,
+            'python':          False,
+            'java':            False,
+            'rust':            False,
+            'cpp':             False,
+            'vb':              False,
+            'structured-data': False,
+            'sql':             False, 
+        },
+        copy_content=False,
+        chatgpt_split=True,
+    )
