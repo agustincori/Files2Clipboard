@@ -2,7 +2,7 @@
 files2clipboard.py
 ──────────────────
 Version:
-    2.0.0
+    2.0.1
 ──────────────────   
 Copy a directory tree – and optionally file contents – to the clipboard.
 Can interactively split very large payloads into ChatGPT‑friendly chunks.
@@ -219,6 +219,7 @@ def _filter_by_technology(
         "vb":              [".vb"],
         "structured-data": [".yml", ".yaml", ".json"],
         "sql":             [".sql", ".psql", ".pgsql", ".ddl", ".dml"],
+        "terraform":       [".tf", ".tf.json", ".tfvars", ".tfvars.json", ".hcl", ".tftpl"],
     }
     if technology_filter:
         selected: list[str] = [
@@ -258,6 +259,7 @@ def _filter_directories(technology_filter: dict[str, bool] | None) -> Set[str]:
         "rust":             {"target"},
         "sql":              {"migrations", "migration", "seeds", "seed",
                              "database", "db", "sql", "ddl", "dml"},
+        "terraform":        {".terraform", ".terraform.lock.hcl"},                             
     }
     if technology_filter:
         for tech, enabled in technology_filter.items():
@@ -342,6 +344,7 @@ if __name__ == "__main__":
             'vb':              False,
             'structured-data': False,
             'sql':             False, 
+            'terraform':       False,
         },
         copy_content=False,
         chatgpt_split=True,
