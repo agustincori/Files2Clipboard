@@ -2,7 +2,7 @@
 files2clipboard.py
 ──────────────────
 Version:
-    2.0.2
+    2.0.3
 ──────────────────   
 Copy a directory tree – and optionally file contents – to the clipboard.
 Can interactively split very large payloads into ChatGPT‑friendly chunks.
@@ -105,7 +105,39 @@ def files_to_clipboard(                   # pylint: disable=too-many-arguments
         tree = ""
 
     if not copy_content:
-        payload = f"Directory tree of {root} (filtered):\n{tree}"
+        def _iter_target_dirs() -> Iterable[Path]:
+            if subdirectories:
+                yield from _walk_dirs(root, excludes)
+            else:
+                yield root
+
+        file_summaries: list[str] = []
+        for dir_path in _iter_target_dirs():
+            for fname in os.listdir(dir_path):
+                if fname == script_name:
+                    continue
+                full_path = dir_path / fname
+                if not full_path.is_file():
+                    continue
+                if exts != ".*" and not any(fname.endswith(ext) for ext in exts):
+                    continue
+                try:
+                    data = full_path.read_text(encoding="utf-8")
+                except Exception as exc:  # pragma: no cover
+                    print(f"[warn] Could not read {full_path}: {exc}", file=sys.stderr)
+                    continue
+                lines = data.count("\n") + 1
+                file_summaries.append(
+                    f"{_relative_label(dir_path, root)}{fname} ({lines} lines)"
+                )
+
+        files_block = (
+            "\n\nFiles (line counts):\n" + "\n".join(file_summaries)
+            if file_summaries
+            else "\n\nFiles (line counts):\n[info] No matching files found."
+        )
+
+        payload = f"Directory tree of {root} (filtered):\n{tree}{files_block}"
         _commit_to_clipboard(payload)
 
         lines = payload.count("\n") + 1          # count \n plus the last line
