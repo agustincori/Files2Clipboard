@@ -2,7 +2,7 @@
 files2clipboard.py
 ──────────────────
 Version:
-    2.0.3
+    2.0.4
 ──────────────────   
 Copy a directory tree – and optionally file contents – to the clipboard.
 Can interactively split very large payloads into ChatGPT‑friendly chunks.
@@ -66,6 +66,7 @@ def files_to_clipboard(                   # pylint: disable=too-many-arguments
     subdirectories: bool = False,
     technology_filter: dict[str, bool] | None = None,
     copy_content: bool = True,
+    inline_line_counts: bool = True,
     chatgpt_split: bool = False,
     max_tokens: int = MAX_TOKENS_PER_CHUNK,
 ) -> None:
@@ -99,45 +100,19 @@ def files_to_clipboard(                   # pylint: disable=too-many-arguments
 
     # ------------------------------------------------------------------ tree
     try:
-        tree = _generate_tree(root, excludes)
+        tree = _generate_tree(
+            root,
+            excludes,
+            include_line_counts=(not copy_content and inline_line_counts),
+            allowed_exts=exts,
+            script_name=script_name,
+        )
     except Exception as exc:  # pragma: no cover
         print(f"[error] Could not generate directory tree: {exc}", file=sys.stderr)
         tree = ""
 
     if not copy_content:
-        def _iter_target_dirs() -> Iterable[Path]:
-            if subdirectories:
-                yield from _walk_dirs(root, excludes)
-            else:
-                yield root
-
-        file_summaries: list[str] = []
-        for dir_path in _iter_target_dirs():
-            for fname in os.listdir(dir_path):
-                if fname == script_name:
-                    continue
-                full_path = dir_path / fname
-                if not full_path.is_file():
-                    continue
-                if exts != ".*" and not any(fname.endswith(ext) for ext in exts):
-                    continue
-                try:
-                    data = full_path.read_text(encoding="utf-8")
-                except Exception as exc:  # pragma: no cover
-                    print(f"[warn] Could not read {full_path}: {exc}", file=sys.stderr)
-                    continue
-                lines = data.count("\n") + 1
-                file_summaries.append(
-                    f"{_relative_label(dir_path, root)}{fname} ({lines} lines)"
-                )
-
-        files_block = (
-            "\n\nFiles (line counts):\n" + "\n".join(file_summaries)
-            if file_summaries
-            else "\n\nFiles (line counts):\n[info] No matching files found."
-        )
-
-        payload = f"Directory tree of {root} (filtered):\n{tree}{files_block}"
+        payload = f"Directory tree of {root} (filtered):\n{tree}"
         _commit_to_clipboard(payload)
 
         lines = payload.count("\n") + 1          # count \n plus the last line
@@ -185,19 +160,93 @@ def _walk_dirs(root: Path, excludes: Set[str]) -> Iterable[Path]:
         yield Path(dir_path)
 
 
-def _generate_tree(root: Path, excludes: Set[str]) -> str:
-    """Return an ASCII tree of *root* excluding *excludes* directories."""
-    lines: list[str] = []
-    for current_root, dir_names, file_names in os.walk(root):
-        dir_names[:] = [d for d in dir_names if d not in excludes]
-        rel          = os.path.relpath(current_root, root)
-        depth        = 0 if rel == "." else rel.count(os.sep) + 1
-        indent       = "│   " * (depth - 1) + ("├── " if depth else "")
-        base         = os.path.basename(current_root) or current_root
-        lines.append(f"{indent}{base}/")
-        for idx, fname in enumerate(file_names):
-            connector = "└── " if idx == len(file_names) - 1 else "├── "
-            lines.append(f"{indent}{connector}{fname}")
+def _generate_tree(
+    root: Path,
+    excludes: Set[str],
+    *,
+    include_line_counts: bool = False,
+    allowed_exts: List[str] | str = ".*",
+    script_name: str | None = None,
+) -> str:
+    """Return an ASCII tree of *root* excluding *excludes* directories.
+
+    When *include_line_counts* is True, eligible files are annotated as
+    'name.ext (N lines)' inline in the tree.
+    """
+    return _generate_tree_with_counts(
+        root,
+        excludes,
+        include_line_counts=include_line_counts,
+        allowed_exts=allowed_exts,
+        script_name=script_name,
+    )
+
+
+def _generate_tree_with_counts(
+    root: Path,
+    excludes: Set[str],
+    *,
+    include_line_counts: bool,
+    allowed_exts: List[str] | str,
+    script_name: str | None,
+) -> str:
+    """Return an ASCII tree of *root* with optional inline '(N lines)' on files."""
+
+    def _matches_allowed(fname: str) -> bool:
+        if fname == script_name:
+            return False
+        if allowed_exts == ".*":
+            return True
+        # Some allow-list entries may be extensions (".py") or literal names ("package.json").
+        return any(fname == ext or fname.endswith(ext) for ext in allowed_exts)
+
+    def _safe_line_count(file_path: Path) -> int | None:
+        if not include_line_counts:
+            return None
+        if not _matches_allowed(file_path.name):
+            return None
+        try:
+            data = file_path.read_text(encoding="utf-8")
+        except Exception:  # pragma: no cover
+            return None
+        return data.count("\n") + 1
+
+    def _iter_entries(dir_path: Path) -> list[Path]:
+        try:
+            entries = list(dir_path.iterdir())
+        except Exception:  # pragma: no cover
+            return []
+        dirs = sorted(
+            [p for p in entries if p.is_dir() and p.name not in excludes],
+            key=lambda p: p.name.lower(),
+        )
+        files = sorted(
+            [p for p in entries if p.is_file()],
+            key=lambda p: p.name.lower(),
+        )
+        return [*dirs, *files]
+
+    lines: list[str] = [f"{root.name}/"]
+
+    def _recurse(dir_path: Path, prefix: str) -> None:
+        entries = _iter_entries(dir_path)
+        for idx, entry in enumerate(entries):
+            is_last = idx == len(entries) - 1
+            connector = "└── " if is_last else "├── "
+
+            if entry.is_dir():
+                lines.append(f"{prefix}{connector}{entry.name}/")
+                extension_prefix = "    " if is_last else "│   "
+                _recurse(entry, prefix + extension_prefix)
+                continue
+
+            label = entry.name
+            line_count = _safe_line_count(entry)
+            if line_count is not None:
+                label = f"{label} ({line_count} lines)"
+            lines.append(f"{prefix}{connector}{label}")
+
+    _recurse(root, "")
     return "\n".join(lines)
 
 
